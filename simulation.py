@@ -132,7 +132,7 @@
   "metadata": {
     "colab": {
       "name": "Welcome To Colab",
-      "toc_visible": true,
+      "toc_visible": True,
       "provenance": []
     },
     "kernelspec": {
