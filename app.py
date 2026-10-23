@@ -1,14 +1,14 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-
+ 
 from simulation import STRATEGIES, compare_all, generate_scenario
 from ai_engine import train_recommender, recommend_strategy, optimize_schedule
-
+ 
 st.set_page_config(page_title="Blackout-Brain", page_icon="⚡", layout="wide")
 st.title("⚡ Blackout-Brain")
 st.caption("Decision-support dashboard for comparing power-restoration strategies after a disaster.")
-
+ 
 # Schematic polygon coordinates: these are illustrative zones, NOT real geographic data.
 CITY_ZONES = {
     "University": [(0.5, 6.2), (2.2, 6.6), (3.0, 5.7), (2.5, 4.6), (0.8, 4.8)],
@@ -24,7 +24,7 @@ CITY_ZONES = {
     "River Area": [(4.5, 2.9), (6.1, 3.1), (6.5, 1.9), (5.7, 0.8), (4.3, 1.3)],
     "Harbor": [(6.4, 2.8), (8.1, 2.9), (9.0, 1.8), (8.3, 0.8), (6.7, 1.1)],
 }
-
+ 
 # Compatibility with older simulation.py versions that used longer region names.
 REGION_ALIASES = {
     "Downtown": "City Center",
@@ -38,16 +38,18 @@ REGION_ALIASES = {
     "West Suburbs": "West Area",
     "Green Valley": "Green Area",
 }
-
+ 
+ 
 def map_region_name(name):
     return REGION_ALIASES.get(name, name)
-
+ 
+ 
 STATUS_COLORS = {
     "Awaiting repair": ("#ef4444", "rgba(239,68,68,0.30)"),
     "Crew dispatched": ("#f59e0b", "rgba(245,158,11,0.34)"),
     "Restored": ("#22c55e", "rgba(34,197,94,0.30)"),
 }
-
+ 
 with st.sidebar:
     st.header("Scenario")
     severity = st.slider("Disaster severity", 1, 5, 3)
@@ -56,8 +58,8 @@ with st.sidebar:
     st.header("Resources")
     crews = st.slider("Repair crews", 1, 6, 2)
     travel = st.slider("Travel time per dispatch (h)", 0.0, 2.0, 0.5, 0.25)
-    run = st.button("▶ Run simulation", type="primary", use_container_width=True)
-
+    run = st.button("▶ Run simulation", type="primary", width="stretch")
+ 
 settings = {
     "severity": severity,
     "n_regions": n_regions,
@@ -65,10 +67,12 @@ settings = {
     "crews": crews,
     "travel": travel,
 }
-
+ 
 if "simulation_data" not in st.session_state:
     st.session_state.simulation_data = None
 if run or st.session_state.simulation_data is None:
+    # FIX 1: a new run invalidates any previous optimization result.
+    st.session_state.pop("ai_optimized_result", None)
     scenario = generate_scenario(n_regions, severity, crews, travel, int(seed))
     table, results = compare_all(scenario)
     st.session_state.simulation_data = {
@@ -77,7 +81,7 @@ if run or st.session_state.simulation_data is None:
         "results": results,
         "settings": settings.copy(),
     }
-
+ 
 saved = st.session_state.simulation_data
 scenario = saved["scenario"]
 table = saved["table"]
@@ -85,36 +89,41 @@ results = saved["results"]
 settings_changed = settings != saved["settings"]
 if settings_changed:
     st.warning("Your settings have changed. The results below belong to the previous run. Click Run simulation to update them.")
-
+ 
 # Summary cards
 best_avg_row = table.loc[table["Avg Restoration Time (h)"].idxmin()]
 least_energy_row = table.loc[table["Unserved Energy (MWh)"].idxmin()]
 fastest_critical_row = table.loc[table["Critical Facilities Avg Restore (h)"].idxmin()]
-
+ 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Affected regions", len(scenario.regions))
 c2.metric("Best average restore time", f"{best_avg_row['Avg Restoration Time (h)']} h", str(best_avg_row["Strategy"]))
 c3.metric("Least unserved energy", f"{least_energy_row['Unserved Energy (MWh)']} MWh", str(least_energy_row["Strategy"]))
 c4.metric("Fastest critical-facility restore", f"{fastest_critical_row['Critical Facilities Avg Restore (h)']} h", str(fastest_critical_row["Strategy"]))
-
+ 
 left, right = st.columns([3.4, 1])
 with left:
     st.subheader("City power status — schematic map")
     strategy_name = st.selectbox("Strategy shown on map and timeline", list(STRATEGIES.keys()), key="map_strategy")
     summary, details, log = results[strategy_name]
     max_time = max(float(details["Restored at (h)"].max()), 1.0)
-    if st.session_state.get("timeline_time", 0.0) > max_time:
+ 
+    # FIX 2: initialise the slider state once, clamp it, and don't pass value= together with key=.
+    st.session_state.setdefault("timeline_time", 0.0)
+    if st.session_state["timeline_time"] > max_time:
         st.session_state["timeline_time"] = max_time
     timeline_time = st.slider(
-        "Simulation time (hours)", min_value=0.0, max_value=float(max_time),
-        value=min(float(st.session_state.get("timeline_time", 0.0)), float(max_time)),
-        step=0.25, key="timeline_time"
+        "Simulation time (hours)",
+        min_value=0.0,
+        max_value=float(max_time),
+        step=0.25,
+        key="timeline_time",
     )
-
+ 
     fig = go.Figure()
     details_by_region = {map_region_name(row["Region"]): row for _, row in details.iterrows()}
     active_regions = set(details_by_region.keys())
-
+ 
     # Draw the city zones, color-coded by their simulated state at the selected time.
     for region_name, points in CITY_ZONES.items():
         if region_name not in active_regions:
@@ -129,7 +138,7 @@ with left:
             else:
                 status = "Awaiting repair"
             color, fill = STATUS_COLORS[status]
-
+ 
         xs = [p[0] for p in points] + [points[0][0]]
         ys = [p[1] for p in points] + [points[0][1]]
         fig.add_trace(go.Scatter(
@@ -144,7 +153,7 @@ with left:
         fig.add_annotation(x=cx, y=cy, text=f"<b>{label}</b>", showarrow=False,
                            font=dict(size=10, color="#f8fafc"), bgcolor="rgba(15,23,42,0.72)",
                            bordercolor=color, borderwidth=1, borderpad=3)
-
+ 
     # Draw illustrative dispatch routes for crews that have left but have not restored power yet.
     center = (5.0, 3.8)
     for _, row in details.iterrows():
@@ -161,7 +170,7 @@ with left:
                 marker=dict(size=[5, 8], color="#e2e8f0"), showlegend=False,
                 hovertemplate=f"Crew {int(row['Crew'])} route to {region_name}<extra></extra>"
             ))
-
+ 
     fig.add_annotation(x=5.0, y=3.8, text="⚡<br>Dispatch<br>Center", showarrow=False,
                        font=dict(size=10, color="#ffffff"), bgcolor="#1d4ed8", borderpad=5)
     fig.update_layout(
@@ -170,9 +179,9 @@ with left:
         font=dict(color="#e2e8f0"),
         xaxis=dict(visible=False, range=[0, 10]), yaxis=dict(visible=False, range=[0.4, 7], scaleanchor="x"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     st.caption("Schematic fictional city: region shapes and dispatch routes are illustrative, not real geographic locations.")
-
+ 
 with right:
     st.subheader("Map legend")
     st.markdown("🟢 **Restored** — power is back\n\n🟠 **Crew dispatched** — repair in progress\n\n🔴 **Awaiting repair** — waiting for a crew\n\n⚪ **Not affected** — outside this scenario")
@@ -182,9 +191,9 @@ with right:
     st.write(f"**Repair crews:** {saved['settings']['crews']}")
     st.write(f"**Travel time:** {saved['settings']['travel']} h per dispatch")
     st.write(f"**Time shown:** {timeline_time:.2f} h")
-
+ 
 st.subheader("Strategy comparison")
-st.dataframe(table, use_container_width=True, hide_index=True)
+st.dataframe(table, width="stretch", hide_index=True)
 chart_col1, chart_col2 = st.columns(2)
 with chart_col1:
     st.markdown("**Average restoration time (lower is better)**")
@@ -192,50 +201,53 @@ with chart_col1:
 with chart_col2:
     st.markdown("**Unserved energy (lower is better)**")
     st.bar_chart(table.set_index("Strategy")[["Unserved Energy (MWh)"]])
-
-st.subheader("Regions and restoration details")
-st.dataframe(details.sort_values("Restored at (h)"), use_container_width=True, hide_index=True)
-
-st.subheader("Event log")
+ 
+# FIX 4: headings show which strategy the details and log belong to.
+st.subheader(f"Regions and restoration details — {strategy_name}")
+st.dataframe(details.sort_values("Restored at (h)"), width="stretch", hide_index=True)
+ 
+st.subheader(f"Event log — {strategy_name}")
 filter_event = st.selectbox("Filter events", ["All", "DISPATCH", "RESTORED"], key="event_filter")
 visible_log = log.copy()
 visible_log = visible_log[visible_log["Time (h)"] <= timeline_time]
 if filter_event != "All":
     visible_log = visible_log[visible_log["Event"] == filter_event]
-st.dataframe(visible_log, use_container_width=True, hide_index=True)
-
+st.dataframe(visible_log, width="stretch", hide_index=True)
+ 
 st.divider()
 st.header("🧠 Hybrid AI Decision Engine")
 st.caption(
     "Educational AI prototype: a Random Forest learns from synthetic scenarios, "
     "then a local-search optimizer improves the recommended repair order."
 )
-
+ 
+ 
 @st.cache_resource
 def get_ai_model():
     return train_recommender(n_samples=180, seed=2026)
-
+ 
+ 
 with st.spinner("Preparing the AI model from synthetic training scenarios..."):
     ai_model = get_ai_model()
-
+ 
 recommendation = recommend_strategy(scenario, ai_model)
 ai_col1, ai_col2, ai_col3 = st.columns(3)
 ai_col1.metric("AI recommended strategy", recommendation["strategy"])
 ai_col2.metric("Model confidence", f"{recommendation['confidence'] * 100:.1f}%")
 ai_col3.metric("Training examples", "180 synthetic scenarios")
-
+ 
 st.info(
     "The model recommends a strategy based on patterns learned from synthetic scenarios. "
     "Confidence is the model's predicted class probability, not a guarantee that the choice is correct."
 )
-
+ 
 st.markdown("**Baseline strategy scores** (lower is better under the project's weighted objective)")
 score_table = pd.DataFrame(
     [{"Strategy": name, "Weighted objective score": score}
      for name, score in recommendation["scores"].items()]
 ).sort_values("Weighted objective score")
-st.dataframe(score_table, use_container_width=True, hide_index=True)
-
+st.dataframe(score_table, width="stretch", hide_index=True)
+ 
 if st.button("✨ Optimize the AI-recommended repair order", type="primary"):
     with st.spinner("Searching for a lower-cost repair order..."):
         optimized = optimize_schedule(
@@ -245,7 +257,7 @@ if st.button("✨ Optimize the AI-recommended repair order", type="primary"):
             seed=int(saved["settings"]["seed"]),
         )
     st.session_state["ai_optimized_result"] = optimized
-
+ 
 if st.session_state.get("ai_optimized_result") is not None:
     optimized = st.session_state["ai_optimized_result"]
     st.subheader("Optimization result")
@@ -254,13 +266,13 @@ if st.session_state.get("ai_optimized_result") is not None:
     m2.metric("Optimized objective score", optimized["optimized_score"])
     m3.metric("Score improvement", f"{optimized['improvement_percent']}%")
     st.write("**Optimized repair order:** " + " → ".join(optimized["order"]))
-    st.dataframe(optimized["details"], use_container_width=True, hide_index=True)
+    st.dataframe(optimized["details"], width="stretch", hide_index=True)
     st.caption(
         "The optimizer uses randomized swap-based local search over region orderings. "
         "The objective combines estimated unserved energy, total restoration time, "
         "and critical-facility restoration time. Results are specific to this simplified simulation."
     )
-
+ 
 csv = table.to_csv(index=False).encode("utf-8")
 st.download_button("⬇ Download strategy comparison (CSV)", data=csv,
                    file_name="blackout_brain_comparison.csv", mime="text/csv")
