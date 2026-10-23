@@ -24,6 +24,23 @@ CITY_ZONES = {
     "Harbor": [(6.4, 2.8), (8.1, 2.9), (9.0, 1.8), (8.3, 0.8), (6.7, 1.1)],
 }
 
+# Compatibility with older simulation.py versions that used longer region names.
+REGION_ALIASES = {
+    "Downtown": "City Center",
+    "North Hills": "North Area",
+    "Riverside": "River Area",
+    "Industrial Zone": "Factory Area",
+    "Airport District": "Airport",
+    "University Quarter": "University",
+    "Medical District": "Hospital Area",
+    "East Suburbs": "East Area",
+    "West Suburbs": "West Area",
+    "Green Valley": "Green Area",
+}
+
+def map_region_name(name):
+    return REGION_ALIASES.get(name, name)
+
 STATUS_COLORS = {
     "Awaiting repair": ("#ef4444", "rgba(239,68,68,0.30)"),
     "Crew dispatched": ("#f59e0b", "rgba(245,158,11,0.34)"),
@@ -94,7 +111,7 @@ with left:
     )
 
     fig = go.Figure()
-    details_by_region = {row["Region"]: row for _, row in details.iterrows()}
+    details_by_region = {map_region_name(row["Region"]): row for _, row in details.iterrows()}
     active_regions = set(details_by_region.keys())
 
     # Draw the city zones, color-coded by their simulated state at the selected time.
@@ -131,8 +148,10 @@ with left:
     center = (5.0, 3.8)
     for _, row in details.iterrows():
         if float(row["Dispatch (h)"]) <= timeline_time < float(row["Restored at (h)"]):
-            region_name = row["Region"]
-            pts = CITY_ZONES[region_name]
+            region_name = map_region_name(row["Region"])
+            pts = CITY_ZONES.get(region_name)
+            if pts is None:
+                continue
             cx = sum(p[0] for p in pts) / len(pts)
             cy = sum(p[1] for p in pts) / len(pts)
             fig.add_trace(go.Scatter(
