@@ -11,33 +11,32 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+# Simple English names for the fictional city regions.
 REGION_NAMES = [
-    "Downtown", "North Hills", "Riverside", "Industrial Zone", "Old Town",
-    "Airport District", "University Quarter", "Harbor", "East Suburbs",
-    "West Suburbs", "Medical District", "Green Valley",
+    "City Center", "North Area", "River Area", "Factory Area", "Old Town",
+    "Airport", "University", "Harbor", "East Area", "West Area",
+    "Hospital Area", "Green Area",
 ]
 
 
 @dataclass
 class Region:
     name: str
-    load_mw: float          # power demand lost during outage
-    hospitals: int          # critical facilities (hospitals, water plants...)
-    repair_hours: float     # pre-sampled repair duration (same for all strategies)
+    load_mw: float
+    hospitals: int
+    repair_hours: float
 
 
 @dataclass
 class Scenario:
     regions: list[Region]
     crews: int
-    travel_hours: float     # dispatch/travel time before each repair
+    travel_hours: float
     severity: int
 
 
 def generate_scenario(n_regions: int, severity: int, crews: int,
                       travel_hours: float = 0.5, seed: int = 42) -> Scenario:
-    """Build a reproducible disaster scenario. Higher severity = more damaged
-    regions and longer repairs."""
     rng = random.Random(seed)
     names = REGION_NAMES[:n_regions]
     n_affected = min(n_regions, max(3, round(n_regions * (0.4 + 0.12 * severity))))
@@ -55,15 +54,17 @@ def generate_scenario(n_regions: int, severity: int, crews: int,
     return Scenario(regions, crews, travel_hours, severity)
 
 
-# ---- strategies: each returns the dispatch order ---------------------------
-def critical_first(regions):      # hospitals first, then shorter repairs
+def critical_first(regions):
     return sorted(regions, key=lambda r: (-r.hospitals, r.repair_hours))
 
-def largest_load_first(regions):  # biggest demand first
+
+def largest_load_first(regions):
     return sorted(regions, key=lambda r: -r.load_mw)
 
-def shortest_repair_first(regions):  # quick wins first
+
+def shortest_repair_first(regions):
     return sorted(regions, key=lambda r: r.repair_hours)
+
 
 STRATEGIES = {
     "Critical-First": critical_first,
@@ -73,7 +74,6 @@ STRATEGIES = {
 
 
 def run_strategy(scenario: Scenario, strategy_name: str):
-    """Greedy dispatch: the earliest-free crew takes the next region in order."""
     order = STRATEGIES[strategy_name](scenario.regions)
     crews = [(0.0, c + 1) for c in range(scenario.crews)]
     heapq.heapify(crews)
