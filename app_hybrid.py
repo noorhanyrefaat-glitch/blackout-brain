@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from simulation import STRATEGIES, compare_all, generate_scenario
+from ai_engine import train_recommender, recommend_strategy, optimize_schedule
 
 st.set_page_config(page_title="Blackout-Brain", page_icon="⚡", layout="wide")
 st.title("⚡ Blackout-Brain")
@@ -202,6 +203,63 @@ visible_log = visible_log[visible_log["Time (h)"] <= timeline_time]
 if filter_event != "All":
     visible_log = visible_log[visible_log["Event"] == filter_event]
 st.dataframe(visible_log, use_container_width=True, hide_index=True)
+
+st.divider()
+st.header("🧠 Hybrid AI Decision Engine")
+st.caption(
+    "Educational AI prototype: a Random Forest learns from synthetic scenarios, "
+    "then a local-search optimizer improves the recommended repair order."
+)
+
+@st.cache_resource
+def get_ai_model():
+    return train_recommender(n_samples=180, seed=2026)
+
+with st.spinner("Preparing the AI model from synthetic training scenarios..."):
+    ai_model = get_ai_model()
+
+recommendation = recommend_strategy(scenario, ai_model)
+ai_col1, ai_col2, ai_col3 = st.columns(3)
+ai_col1.metric("AI recommended strategy", recommendation["strategy"])
+ai_col2.metric("Model confidence", f"{recommendation['confidence'] * 100:.1f}%")
+ai_col3.metric("Training examples", "180 synthetic scenarios")
+
+st.info(
+    "The model recommends a strategy based on patterns learned from synthetic scenarios. "
+    "Confidence is the model's predicted class probability, not a guarantee that the choice is correct."
+)
+
+st.markdown("**Baseline strategy scores** (lower is better under the project's weighted objective)")
+score_table = pd.DataFrame(
+    [{"Strategy": name, "Weighted objective score": score}
+     for name, score in recommendation["scores"].items()]
+).sort_values("Weighted objective score")
+st.dataframe(score_table, use_container_width=True, hide_index=True)
+
+if st.button("✨ Optimize the AI-recommended repair order", type="primary"):
+    with st.spinner("Searching for a lower-cost repair order..."):
+        optimized = optimize_schedule(
+            scenario,
+            initial_strategy=recommendation["strategy"],
+            iterations=350,
+            seed=int(saved["settings"]["seed"]),
+        )
+    st.session_state["ai_optimized_result"] = optimized
+
+if st.session_state.get("ai_optimized_result") is not None:
+    optimized = st.session_state["ai_optimized_result"]
+    st.subheader("Optimization result")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Starting objective score", optimized["initial_score"])
+    m2.metric("Optimized objective score", optimized["optimized_score"])
+    m3.metric("Score improvement", f"{optimized['improvement_percent']}%")
+    st.write("**Optimized repair order:** " + " → ".join(optimized["order"]))
+    st.dataframe(optimized["details"], use_container_width=True, hide_index=True)
+    st.caption(
+        "The optimizer uses randomized swap-based local search over region orderings. "
+        "The objective combines estimated unserved energy, total restoration time, "
+        "and critical-facility restoration time. Results are specific to this simplified simulation."
+    )
 
 csv = table.to_csv(index=False).encode("utf-8")
 st.download_button("⬇ Download strategy comparison (CSV)", data=csv,
